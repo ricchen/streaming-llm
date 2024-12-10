@@ -14,15 +14,15 @@ from tqdm import tqdm
 from streaming_llm.utils import load, download_url, load_jsonl
 from streaming_llm.enable_streaming_llm import enable_streaming_llm
 
-
 @torch.no_grad()
-def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len):
+def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len, kv_cache=None):
     outputs = model(
         input_ids=input_ids,
         past_key_values=past_key_values,
         use_cache=True,
     )
-    past_key_values = outputs.past_key_values
+    if kv_cache is not None:
+        past_key_values = outputs.past_key_values
     pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
     generated_ids = [pred_token_idx.item()]
     pos = 0
@@ -32,7 +32,8 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len):
             past_key_values=past_key_values,
             use_cache=True,
         )
-        past_key_values = outputs.past_key_values
+        if kv_cache is not None:
+            past_key_values = outputs.past_key_values
         pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
         generated_ids.append(pred_token_idx.item())
         generated_text = (
@@ -54,12 +55,13 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len):
         if pred_token_idx == tokenizer.eos_token_id:
             break
     print(" ".join(generated_text[pos:]), flush=True)
-    return past_key_values
+    return past_key_values, generated_text
 
 
 @torch.no_grad()
-def streaming_inference(model, tokenizer, prompts, kv_cache=None, max_gen_len=1000):
+def streaming_inference(model, tokenizer, prompts, kv_cache=None, max_gen_len=200):
     past_key_values = None
+    generated_text = None
     for idx, prompt in enumerate(prompts):
         prompt = "USER: " + prompt + "\n\nASSISTANT: "
         print("\n" + prompt, end="")
@@ -68,11 +70,13 @@ def streaming_inference(model, tokenizer, prompts, kv_cache=None, max_gen_len=10
         seq_len = input_ids.shape[1]
         if kv_cache is not None:
             space_needed = seq_len + max_gen_len
-            past_key_values = kv_cache.evict_for_space(past_key_values, space_needed)
+            # print("comparison", past_key_values[0][0].size() if past_key_values else 0, space_needed)
+            past_key_values = kv_cache.evict_for_space(past_key_values, space_needed, generated_text)
 
-        past_key_values = greedy_generate(
-            model, tokenizer, input_ids, past_key_values, max_gen_len=max_gen_len
+        past_key_values, generated_text = greedy_generate(
+            model, tokenizer, input_ids, kv_cache.concat(past_key_values, kv_cache.get_rag(prompt)) if past_key_values and kv_cache else None, max_gen_len=max_gen_len, kv_cache=kv_cache
         )
+    kv_cache.clear_db()
 
 
 def main(args):
@@ -116,7 +120,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_root", type=str, default="data/")
     parser.add_argument("--enable_streaming", action="store_true")
     parser.add_argument("--start_size", type=int, default=4)
-    parser.add_argument("--recent_size", type=int, default=2000)
+    parser.add_argument("--recent_size", type=int, default=500)
     args = parser.parse_args()
 
     main(args)

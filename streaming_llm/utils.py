@@ -14,7 +14,7 @@ import json
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model_name_or_path", type=str, default="models/llama/llama-7b"
+        "--model_name_or_path", type=str, default="huggyllama/llama-7b"
     )
     parser.add_argument("--revision", type=str, default="main")
     parser.add_argument("--tokenizer_name_or_path", type=str, default=None)
@@ -28,7 +28,7 @@ def parse_args():
     parser.add_argument(
         "--num_samples",
         type=int,
-        default=1,
+        default=10,
     )
 
     parser.add_argument(
